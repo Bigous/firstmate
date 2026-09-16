@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Exercise the registered Codex Stop hooks with real watcher processes and a
-# deterministic queue transport. Native delivery is covered by the opt-in E2E.+# shellcheck disable=SC2016
+# deterministic queue transport. Native delivery is covered by the opt-in E2E.
+# shellcheck disable=SC2016
 set -u
+# shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 TMP_ROOT=$(fm_test_tmproot fm-codex-stop-autoarm)
 fm_git_identity fmtest fmtest@example.invalid
@@ -48,6 +50,8 @@ test_registered_stop_keeps_watch_and_delivers() {
       done
       guard=$(jq -r '"'"'.hooks.Stop[].hooks[] | select(.async != true) | .command'"'"' .codex/hooks.json)
       printf "%s\n" "$payload" | bash -c "$guard" || exit 1
+      # A concurrent Stop must defer to the existing native callback owner.
+      printf "%s\n" "$payload" | bash -c "$hook" || exit 1
       sleep 2
       kill -0 "$(cat state/.watch.lock/pid)" || exit 1
       printf "done: native stop regression\n" > state/demo.status
@@ -65,4 +69,63 @@ test_registered_stop_keeps_watch_and_delivers() {
   pass "registered Codex Stop keeps a quiet watcher alive and queues one durable wake"
 }
 
+test_inert_without_authority() {
+  local home
+  home=$(make_home foreign)
+  printf '%s\n' "$PPID" > "$home/state/.lock"
+  printf '%s\n' '{"session_id":"test-session","turn_id":"foreign"}' \
+    | FM_HOME="$home" "$home/bin/fm-codex-stop-autoarm.sh" || fail "foreign hook failed"
+  assert_absent "$home/state/.codex-autoarm.json" "foreign session published a claim"
+  assert_absent "$home/state/.watch.lock/pid" "foreign session armed the watcher"
+  pass "a foreign session cannot arm or queue for this home"
+}
+
+test_failed_delivery_retains_wake() {
+  local home rc=0
+  home=$(make_home failed-delivery)
+  cat > "$home/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'durable pending event\n' > "$FM_HOME/state/.wake-queue"
+printf 'check: fixture wake\n'
+SH
+  FM_HOME="$home" QUEUE_FAIL=1 "$FAKEBIN/codex-harness" -c '
+    printf "%s\n" "$$" > "$FM_HOME/state/.lock"
+    printf "%s\n" '"'"'{"session_id":"test-session","turn_id":"failed"}'"'"' \
+      | "$FM_HOME/bin/fm-codex-stop-autoarm.sh"
+  ' > "$home/output" 2>&1 || rc=$?
+  expect_code 1 "$rc" "queue failure"
+  assert_contains "$(cat "$home/state/.wake-queue")" 'durable pending event' 'wake was lost'
+  [ "$(jq -r .phase "$home/state/.codex-autoarm.json")" = failed ] || fail 'failure read as health'
+  assert_absent "$home/queued" 'failed queue reported delivery'
+  pass "failed native delivery preserves the durable wake and records failure"
+}
+
+test_queue_receipt_is_bound_and_expires() {
+  local home rc=0
+  home=$(make_home receipt)
+  cat > "$home/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'check: receipt fixture\n'
+SH
+  FM_HOME="$home" "$FAKEBIN/codex-harness" -c '
+    printf "%s\n" "$$" > "$FM_HOME/state/.lock"
+    printf "%s\n" '"'"'{"session_id":"test-session","turn_id":"origin"}'"'"' \
+      | "$FM_HOME/bin/fm-codex-stop-autoarm.sh" || exit 1
+    owner="$FM_HOME/bin/fm-codex-stop-autoarm.sh"
+    "$owner" --ready test-session origin || exit 1
+    "$owner" --handling || exit 1
+    if "$owner" --ready foreign origin; then exit 1; fi
+    if "$owner" --ready test-session next-turn; then exit 1; fi
+    jq ".time = 0" "$FM_HOME/state/.codex-autoarm.json" > "$FM_HOME/expired"
+    mv "$FM_HOME/expired" "$FM_HOME/state/.codex-autoarm.json"
+    if "$owner" --ready test-session origin; then exit 1; fi
+    if "$owner" --handling; then exit 1; fi
+  ' || rc=$?
+  expect_code 0 "$rc" 'receipt binding and expiry'
+  pass "queued receipt is bound to the session and Stop turn, and both guard tolerances expire"
+}
+
 test_registered_stop_keeps_watch_and_delivers
+test_inert_without_authority
+test_failed_delivery_retains_wake
+test_queue_receipt_is_bound_and_expires
