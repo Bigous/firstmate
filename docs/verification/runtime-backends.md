@@ -63,8 +63,10 @@ With the current boundaries in place, from the same command and the same process
 verdict=codex
 ancestry=comm codex
 SUPERVISION OPERATING INSTRUCTIONS - primary harness: codex
-Mode: Codex foreground checkpoint.
+Mode: Codex native Stop-owned supervision.
 ```
+
+The rendered Mode line reflects the native Stop-owned protocol now in place; see [supervision verification](supervision.md) for that protocol's own live evidence.
 
 Two boundaries are load-bearing here, and the marker-versus-ancestry precedence above is only the first.
 The walk also used to stop as soon as the next pid was 1, on the assumption that pid 1 is always init.
