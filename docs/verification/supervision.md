@@ -472,7 +472,7 @@ grok 0.2.103 (89c3d36fb6f1) [stable]
 Verified with codex-cli 0.154.0 in an isolated Git checkout driven through a real interactive PTY.
 The fixture consumes the tracked Stop registration, registers a harmless custom check, and acquires its own session lock through a native SessionStart hook.
 It never uses the operator's fleet state or asks the model to arm a watcher.
-This supersedes the foreground-only continuity result for Codex 0.144.4; it does not establish compaction or context-reset delivery.
+This establishes native continuity for the capable CLI; older or unsupported installations retain the foreground protocol, and compaction or context-reset delivery remains unverified.
 
 ```sh
 FM_CODEX_LIVE_E2E=1 bin/fm-test-run.sh tests/fm-codex-continuity-live-e2e.test.sh

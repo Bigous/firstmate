@@ -211,7 +211,9 @@ fm_supervision_model() {
   harness=$("$FM_WAKE_LIB_DIR/fm-harness.sh" 2>/dev/null || printf unknown)
   case "$harness" in
     claude|cursor) printf 'autoarm\n' ;;
-    codex) printf 'codex\n' ;;
+    codex)
+      if "$FM_WAKE_LIB_DIR/fm-codex-native-capable.sh"; then printf 'codex\n'; else printf 'persistent\n'; fi
+      ;;
     pi|pi-signed|omp) printf 'extension\n' ;;
     *) printf 'persistent\n' ;;
   esac

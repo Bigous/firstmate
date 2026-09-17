@@ -11,7 +11,11 @@ FAKEBIN=$(fm_fakebin "$TMP_ROOT/fakebin")
 ln -s /bin/bash "$FAKEBIN/codex-harness"
 cat > "$FAKEBIN/codex" <<'SH'
 #!/usr/bin/env bash
-if [ "$*" = 'queue --help' ]; then exit 0; fi
+case "$*" in
+  --version) printf 'codex-cli %s\n' "${CODEX_TEST_VERSION:-0.154.0}"; exit 0 ;;
+  'features list') printf 'hooks stable true\n'; exit 0 ;;
+  'queue --help') printf 'Usage: codex queue --thread <THREAD> --message <TEXT>\n'; exit 0 ;;
+esac
 [ "${QUEUE_FAIL:-0}" != 1 ] || exit 1
 printf '%s\n' "$*" >> "$FM_HOME/queued"
 SH
@@ -70,13 +74,17 @@ test_registered_stop_keeps_watch_and_delivers() {
 }
 
 test_inert_without_authority() {
-  local home
+  local home foreign_pid
   home=$(make_home foreign)
-  printf '%s\n' "$PPID" > "$home/state/.lock"
+  "$FAKEBIN/codex-harness" -c 'sleep 60' &
+  foreign_pid=$!
+  printf '%s\n' "$foreign_pid" > "$home/state/.lock"
   printf '%s\n' '{"session_id":"test-session","turn_id":"foreign"}' \
     | FM_HOME="$home" "$home/bin/fm-codex-stop-autoarm.sh" || fail "foreign hook failed"
   assert_absent "$home/state/.codex-autoarm.json" "foreign session published a claim"
   assert_absent "$home/state/.watch.lock/pid" "foreign session armed the watcher"
+  kill "$foreign_pid" 2>/dev/null || true
+  wait "$foreign_pid" 2>/dev/null || true
   pass "a foreign session cannot arm or queue for this home"
 }
 
@@ -125,6 +133,33 @@ SH
   pass "queued receipt is bound to the session and Stop turn, and both guard tolerances expire"
 }
 
+test_legacy_fallback_is_inert_and_keeps_guard() {
+  local home rc=0
+  home=$(make_home legacy)
+  cp -R "$ROOT/docs" "$home/docs"
+  FM_HOME="$home" CODEX_TEST_VERSION=0.153.0 FM_HARNESS=codex "$FAKEBIN/codex-harness" -c '
+    printf "%s\n" "$$" > "$FM_HOME/state/.lock"
+    cd "$FM_HOME" || exit 1
+    payload='"'"'{"session_id":"legacy","turn_id":"fallback","stop_hook_active":false}'"'"'
+    printf "%s\n" "$payload" | bin/fm-codex-stop-autoarm.sh || exit 1
+    [ ! -e state/.codex-autoarm.json ] || exit 1
+    [ ! -e state/.watch.lock ] || exit 1
+    [ ! -e queued ] || exit 1
+    if bin/fm-codex-stop-autoarm.sh --ready legacy fallback; then exit 1; fi
+    if bin/fm-codex-stop-autoarm.sh --handling; then exit 1; fi
+    . bin/fm-wake-lib.sh
+    [ "$(fm_supervision_model)" = persistent ] || exit 1
+    status=0
+    printf "%s\n" "$payload" | bin/fm-turnend-guard.sh --codex > guard.out 2>&1 || status=$?
+    [ "$status" -eq 2 ] || { cat guard.out; exit 1; }
+    grep -q fm-watch-checkpoint.sh guard.out || { cat guard.out; exit 1; }
+    printf "%s\n" '"'"'{"stop_hook_active":true}'"'"' | bin/fm-turnend-guard.sh --codex || exit 1
+  ' > "$home/result" 2>&1 || rc=$?
+  expect_code 0 "$rc" "legacy callback/model/guard: $(cat "$home/result")"
+  pass 'unsupported Codex keeps the checkpoint model and blocking repair guard, without native state or queue'
+}
+
+test_legacy_fallback_is_inert_and_keeps_guard
 test_registered_stop_keeps_watch_and_delivers
 test_inert_without_authority
 test_failed_delivery_retains_wake

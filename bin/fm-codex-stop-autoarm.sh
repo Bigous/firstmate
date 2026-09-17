@@ -33,6 +33,12 @@ LOCK="$STATE/.codex-autoarm.lock"
 RECORD="$STATE/.codex-autoarm.json"
 FAILURE="$STATE/.codex-autoarm-failure"
 GRACE=${FM_GUARD_GRACE:-$(fm_poll_derived_grace)}
+# Older CLIs may execute async registrations synchronously. Remain inert there;
+# read-only health queries must never accept stale native receipts in fallback.
+if ! "$SCRIPT_DIR/fm-codex-native-capable.sh"; then
+  [ "$#" -eq 0 ] && exit 0
+  exit 1
+fi
 
 ready() {
   local session=$1 turn=$2 data pid identity phase recorded_turn stamp session_pid session_identity
@@ -80,8 +86,6 @@ fm_session_lock_owned_by_self "$STATE" || exit 0
 [ ! -e "$STATE/.afk" ] || exit 0
 fm_supervision_needed "$STATE" "$GRACE" || exit 0
 ready "$SESSION" "$TURN" && exit 0
-command -v codex >/dev/null 2>&1 || exit 1
-codex queue --help >/dev/null 2>&1 || exit 1
 umask 077
 # A previous firing may be publishing its queue receipt. Wait for it to release
 # the lock, or defer only once it proves an actual live watcher/callback pair.

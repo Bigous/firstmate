@@ -205,7 +205,7 @@ allow_supervised_stop() {
   exit 2
 }
 
-if [ "$CODEX_MODE" -eq 1 ] && [ ! -e "$STATE/.afk" ]; then
+if [ "$CODEX_MODE" -eq 1 ] && [ ! -e "$STATE/.afk" ] && "$SCRIPT_DIR/fm-codex-native-capable.sh"; then
   CODEX_TURN=$(printf '%s' "$PAYLOAD" | jq -r '.turn_id // ""')
   CODEX_DEADLINE=$(( $(date +%s) + 12 ))
   while [ "$(date +%s)" -lt "$CODEX_DEADLINE" ]; do

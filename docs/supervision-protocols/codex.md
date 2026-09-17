@@ -10,6 +10,6 @@ When this session owns supervision and away mode is not active:
    A foreground `bin/fm-watch-checkpoint.sh` remains a bounded diagnostic tool, not proof of supervision after the turn ends.
 5. Never start a detached shell watcher or use a model-owned background task to replace the native hook.
 
-This integration requires Codex CLI 0.154.0 or newer with native asynchronous command hooks and `codex queue`.
+The renderer selects this protocol only when the shared capability gate confirms native support; otherwise it emits the legacy foreground checkpoint protocol.
 Its verified scope is a running interactive Codex session; exiting the session cancels its background hooks.
 The callback ownership and failure contract is defined in [`../watcher-continuity.md`](../watcher-continuity.md).
